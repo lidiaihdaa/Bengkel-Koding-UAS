@@ -29,7 +29,7 @@ except FileNotFoundError:
 
 # Tampilan Judul Web
 st.title("📊 Aplikasi Prediksi Customer Churn")
-st.write("Aplikasi cerdas berbasis Machine Learning untuk memprediksi apakah pelanggan akan berhenti berlangganan (*Churn*) atau bertahan (*Retained*).")
+st.write("Aplikasi cerdas berbasis Machine Learning untuk memprediksi status pelanggan.")
 st.markdown("---")
 
 st.subheader("💡 Masukkan Data Profil Transaksi Pelanggan")
@@ -45,13 +45,20 @@ with col2:
     gender = st.selectbox("Jenis Kelamin (Gender):", options=["Male", "Female"])
     sub_type = st.selectbox("Tipe Langganan (Subscription Type):", options=["Basic", "Standard", "Premium"])
 
-# Membuat DataFrame Baru dari Input Form dengan penyesuaian otomatis nama kolom latih
-# Mengambil 4 nama kolom pertama dari model_features agar dijamin 100% sama dengan data latih
-col_age = model_features[0]
-col_bill = model_features[1]
-col_usage = model_features[2]
-col_tenure = model_features[3]
+# 1. OTOMATIS COCOKKAN NAMA KOLOM DENGAN MODEL FEATURES (Mencegah Typo / Perbedaan Kapital)
+# Kita cari string yang mirip di dalam model_features
+def get_exact_col_name(input_name, features_list):
+    for f in features_list:
+        if input_name.lower() == f.lower().strip():
+            return f
+    return input_name
 
+col_age = get_exact_col_name('age', model_features)
+col_bill = get_exact_col_name('monthly_bill', model_features)
+col_usage = get_exact_col_name('total_usage', model_features)
+col_tenure = get_exact_col_name('tenure_days', model_features)
+
+# 2. Buat DataFrame Awal
 input_data = pd.DataFrame([{
     col_age: float(age),
     col_bill: float(monthly_bill),
@@ -61,20 +68,35 @@ input_data = pd.DataFrame([{
     'subscription_type': sub_type
 }])
 
-# One-Hot Encoding otomatis
+# 3. One-Hot Encoding
 input_encoded = pd.get_dummies(input_data)
 
-# Sinkronisasi kolom agar sama persis dengan susunan model_features.pkl
+# 4. Cari kolom dummy gender dan subscription type yang sesuai di model_features
+for f in model_features:
+    for col in input_encoded.columns:
+        if col.lower().replace(" ", "") in f.lower().replace("_", "").replace(" ", ""):
+            input_encoded = input_encoded.rename(columns={col: f})
+
+# 5. Sinkronisasi total seluruh kolom agar identik dengan model_features.pkl
 for col in model_features:
     if col not in input_encoded.columns:
         input_encoded[col] = 0
 
 input_final = input_encoded[model_features].copy()
 
-# Normalisasi Fitur Numerik menggunakan Scaler secara aman tanpa trigger KeyError nama kolom
+# 6. NORMALISASI SCALER BERDASARKAN FILTER KOLOM YANG VALID DI SCALER
 kolom_numeric_real = [col_age, col_bill, col_usage, col_tenure]
-input_numeric_scaled = scaler.transform(input_final[kolom_numeric_real])
-input_final.loc[:, kolom_numeric_real] = input_numeric_scaled
+# Validasi apakah kolom beneran dikenali oleh scaler bawaan
+kolom_valid_scaler = [c for c in kolom_numeric_real if c in model_features]
+
+if kolom_valid_scaler:
+    try:
+        input_numeric_scaled = scaler.transform(input_final[kolom_valid_scaler])
+        input_final.loc[:, kolom_valid_scaler] = input_numeric_scaled
+    except Exception as e:
+        # Jika scaler setup-nya menggunakan total seluruh fitur encoding
+        input_final_scaled = scaler.transform(input_final)
+        input_final = pd.DataFrame(input_final_scaled, columns=model_features)
 
 # Tombol Eksekusi Prediksi
 st.markdown("---")
