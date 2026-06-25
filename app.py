@@ -3,12 +3,14 @@ import pandas as pd
 import numpy as np
 import pickle
 
+# Konfigurasi dasar Halaman Web
 st.set_page_config(
     page_title="Prediksi Customer Churn App",
     page_icon="📊",
     layout="centered"
 )
 
+# Fungsi memuat semua file pintar .pkl
 @st.cache_resource
 def load_machine_learning_components():
     with open('best_random_forest_model.pkl', 'rb') as f:
@@ -22,11 +24,12 @@ def load_machine_learning_components():
 try:
     model, scaler, model_features = load_machine_learning_components()
 except FileNotFoundError:
-    st.error("⚠️ File .pkl tidak ditemukan!")
+    st.error("⚠️ File .pkl tidak ditemukan di folder proyek!")
     st.stop()
 
+# Tampilan Judul Web
 st.title("📊 Aplikasi Prediksi Customer Churn")
-st.write("Aplikasi cerdas berbasis Machine Learning untuk memprediksi status pelanggan.")
+st.write("Aplikasi cerdas berbasis Machine Learning untuk memprediksi apakah pelanggan akan berhenti berlangganan (*Churn*) atau bertahan (*Retained*).")
 st.markdown("---")
 
 st.subheader("💡 Masukkan Data Profil Transaksi Pelanggan")
@@ -42,31 +45,38 @@ with col2:
     gender = st.selectbox("Jenis Kelamin (Gender):", options=["Male", "Female"])
     sub_type = st.selectbox("Tipe Langganan (Subscription Type):", options=["Basic", "Standard", "Premium"])
 
-# MEMBUAT DATAFRAME BARU YANG AMAN DARI COPY WARNING
+# Membuat DataFrame Baru dari Input Form dengan penyesuaian otomatis nama kolom latih
+# Mengambil 4 nama kolom pertama dari model_features agar dijamin 100% sama dengan data latih
+col_age = model_features[0]
+col_bill = model_features[1]
+col_usage = model_features[2]
+col_tenure = model_features[3]
+
 input_data = pd.DataFrame([{
-    'age': float(age),
-    'monthly_bill': float(monthly_bill),
-    'total_usage': float(total_usage),
-    'tenure_days': float(tenure_days),
+    col_age: float(age),
+    col_bill: float(monthly_bill),
+    col_usage: float(total_usage),
+    col_tenure: float(tenure_days),
     'gender': gender,
     'subscription_type': sub_type
 }])
 
-# One-Hot Encoding
+# One-Hot Encoding otomatis
 input_encoded = pd.get_dummies(input_data)
 
-# Menyamakan kolom dengan model_features.pkl
+# Sinkronisasi kolom agar sama persis dengan susunan model_features.pkl
 for col in model_features:
     if col not in input_encoded.columns:
         input_encoded[col] = 0
 
 input_final = input_encoded[model_features].copy()
 
-# PROSES SCALING YANG DIJAMIN AMAN & SEHAT (Mencegah Blank Putih)
-kolom_numeric = ['age', 'monthly_bill', 'total_usage', 'tenure_days']
-input_numeric_scaled = scaler.transform(input_final[kolom_numeric])
-input_final.loc[:, kolom_numeric] = input_numeric_scaled
+# Normalisasi Fitur Numerik menggunakan Scaler secara aman tanpa trigger KeyError nama kolom
+kolom_numeric_real = [col_age, col_bill, col_usage, col_tenure]
+input_numeric_scaled = scaler.transform(input_final[kolom_numeric_real])
+input_final.loc[:, kolom_numeric_real] = input_numeric_scaled
 
+# Tombol Eksekusi Prediksi
 st.markdown("---")
 if st.button("🚀 Jalankan Analisis Prediksi Churn", type="primary"):
     prediction = model.predict(input_final)[0]
