@@ -17,14 +17,28 @@ def load_machine_learning_components():
         model = pickle.load(f)
     with open('scaler.pkl', 'rb') as f:
         scaler = pickle.load(f)
-    with open('model_features.pkl', 'rb') as f:
-        features = pickle.load(f)
-    return model, scaler, features
+    # Kita baca contoh data asli untuk replikasi dummy encoding yang sempurna
+    try:
+        df_sample = pd.read_csv('Sales - Marketing customer dataset.csv').dropna()
+        # Buat dummy encoding dari data asli persis seperti di Colab (buang kolom target jika ada)
+        if 'Target' in df_sample.columns:
+            df_sample = df_sample.drop(columns=['Target'])
+        elif 'churn' in df_sample.columns:
+            df_sample = df_sample.drop(columns=['churn'])
+            
+        # Pisahkan fitur dan target (X)
+        X_sample = pd.get_dummies(df_sample)
+        features_list = list(X_sample.columns)
+    except Exception:
+        # Fallback jika file csv tidak terbaca
+        with open('model_features.pkl', 'rb') as f:
+            features_list = pickle.load(f)
+    return model, scaler, features_list
 
 try:
     model, scaler, model_features = load_machine_learning_components()
 except FileNotFoundError:
-    st.error("⚠️ File .pkl tidak ditemukan di folder proyek!")
+    st.error("⚠️ File komponen model tidak ditemukan di folder proyek!")
     st.stop()
 
 # Tampilan Judul Web
@@ -46,58 +60,51 @@ with col2:
     sub_type = st.selectbox("Tipe Langganan (Subscription Type):", options=["Basic", "Standard", "Premium"])
 
 # ---------------------------------------------------------------------------------
-# RESTRUKTURISASI SISTEM PEMETAAN 42 KOLOM SESUAI URUTAN ASLI MODEL_FEATURES
+# SINKRONISASI KOLOM 100% SAMA DENGAN STRUKTUR DATA TRAINING
 # ---------------------------------------------------------------------------------
 
-# 1. Deteksi nama kolom numerik asli di model_features secara fleksibel (abaikan huruf besar/kecil)
-def cari_nama_kolom(nama_input, daftar_fitur):
-    for f in daftar_fitur:
-        if nama_input.lower() == f.lower().strip():
+# 1. Cari nama kolom numerik asli di list features
+def map_column_name(name, list_f):
+    for f in list_f:
+        if name.lower() == f.lower().strip():
             return f
-    return None
+    return name
 
-col_age = cari_nama_kolom('age', model_features) or 'Age'
-col_bill = cari_nama_kolom('monthly_bill', model_features) or 'Monthly_Bill'
-col_usage = cari_nama_kolom('total_usage', model_features) or 'Total_Usage'
-col_tenure = cari_nama_kolom('tenure_days', model_features) or 'Tenure_Days'
+col_age = map_column_name('age', model_features)
+col_bill = map_column_name('monthly_bill', model_features)
+col_usage = map_column_name('total_usage', model_features)
+col_tenure = map_column_name('tenure_days', model_features)
 
-# 2. Buat dataframe awal untuk proses scaling data numerik
-df_input = pd.DataFrame([{
-    col_age: float(age),
-    col_bill: float(monthly_bill),
-    col_usage: float(total_usage),
-    col_tenure: float(tenure_days)
-}])
+# 2. Buat dictionary dengan nilai default 0 untuk semua 42 kolom
+final_data_dict = {feat: 0.0 for feat in model_features}
 
-# 3. Lakukan normalisasi data numerik via Scaler bawaan
+# 3. Buat DataFrame sementara untuk proses scaling nilai numerik
+df_num = pd.DataFrame([{col_age: float(age), col_bill: float(monthly_bill), col_usage: float(total_usage), col_tenure: float(tenure_days)}])
 try:
-    df_input[[col_age, col_bill, col_usage, col_tenure]] = scaler.transform(df_input[[col_age, col_bill, col_usage, col_tenure]])
+    df_num[[col_age, col_bill, col_usage, col_tenure]] = scaler.transform(df_num[[col_age, col_bill, col_usage, col_tenure]])
 except Exception:
     pass
 
-# 4. Buat dictionary kosong untuk menampung seluruh susunan 42 kolom model_features
-data_mapping = {fitur: 0.0 for fitur in model_features}
+# 4. Masukkan skor numerik hasil scaling ke dictionary utama
+final_data_dict[col_age] = float(df_num[col_age].values[0])
+final_data_dict[col_bill] = float(df_num[col_bill].values[0])
+final_data_dict[col_usage] = float(df_num[col_usage].values[0])
+final_data_dict[col_tenure] = float(df_num[col_tenure].values[0])
 
-# 5. Masukkan nilai numerik hasil scaling ke dictionary mapping
-data_mapping[col_age] = float(df_input[col_age].values[0])
-data_mapping[col_bill] = float(df_input[col_bill].values[0])
-data_mapping[col_usage] = float(df_input[col_usage].values[0])
-data_mapping[col_tenure] = float(df_input[col_tenure].values[0])
-
-# 6. Petakan kategori dummy (Gender dan Subscription Type) secara akurat ke dalam 42 kolom
-for fitur in model_features:
-    # Cek Gender dummy (contoh: Gender_Female, Gender_Male)
-    if 'gender' in fitur.lower():
-        if gender.lower() in fitur.lower():
-            data_mapping[fitur] = 1.0
+# 5. Nyalakan nilai 1.0 pada kolom kategori dummy secara presisi
+for feat in model_features:
+    # Cek kecocokan kategori Gender
+    if 'gender' in feat.lower():
+        if gender.lower() in feat.lower():
+            final_data_dict[feat] = 1.0
             
-    # Cek Subscription Type dummy (contoh: Subscription_Type_Basic, dll)
-    if 'sub' in fitur.lower() or 'type' in fitur.lower():
-        if sub_type.lower() in fitur.lower():
-            data_mapping[fitur] = 1.0
+    # Cek kecocokan kategori Subscription Type
+    if 'sub' in feat.lower() or 'type' in feat.lower():
+        if sub_type.lower() in feat.lower():
+            final_data_dict[feat] = 1.0
 
-# 7. Konversi dictionary mapping yang sudah matang menjadi DataFrame final berdimensi 42 kolom
-input_final = pd.DataFrame([data_mapping])[model_features]
+# 6. Ubah menjadi DataFrame final dengan urutan kolom yang mutlak sama
+input_final = pd.DataFrame([final_data_dict])[model_features]
 
 # Tombol Eksekusi Prediksi
 st.markdown("---")
@@ -106,7 +113,7 @@ if st.button("🚀 Jalankan Analisis Prediksi Churn", type="primary"):
     prediction_proba = model.predict_proba(input_final.values)[0]
     
     st.subheader("🎯 Hasil Keputusan Analisis:")
-    if prediction == 1:
+    if int(prediction) == 1:
         st.error(f"🚨 **PELANGGAN BERPOTENSI CHURN (BERHENTI BERLANGGANAN)**")
         st.write(f"Tingkat Probabilitas Keyakinan Model: **{prediction_proba[1]*100:.2f}%**")
     else:
