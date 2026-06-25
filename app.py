@@ -10,19 +10,17 @@ st.set_page_config(
     layout="centered"
 )
 
-# Fungsi memuat semua file pintar .pkl
+# Fungsi memuat model dan scaler saja
 @st.cache_resource
 def load_machine_learning_components():
     with open('best_random_forest_model.pkl', 'rb') as f:
         model = pickle.load(f)
     with open('scaler.pkl', 'rb') as f:
         scaler = pickle.load(f)
-    with open('model_features.pkl', 'rb') as f:
-        features = pickle.load(f)
-    return model, scaler, features
+    return model, scaler
 
 try:
-    model, scaler, model_features = load_machine_learning_components()
+    model, scaler = load_machine_learning_components()
 except FileNotFoundError:
     st.error("⚠️ File .pkl tidak ditemukan di folder proyek!")
     st.stop()
@@ -45,69 +43,48 @@ with col2:
     gender = st.selectbox("Jenis Kelamin (Gender):", options=["Male", "Female"])
     sub_type = st.selectbox("Tipe Langganan (Subscription Type):", options=["Basic", "Standard", "Premium"])
 
-# 1. OTOMATIS COCOKKAN NAMA KOLOM DENGAN MODEL FEATURES (Mencegah Typo / Perbedaan Kapital)
-# Kita cari string yang mirip di dalam model_features
-def get_exact_col_name(input_name, features_list):
-    for f in features_list:
-        if input_name.lower() == f.lower().strip():
-            return f
-    return input_name
-
-col_age = get_exact_col_name('age', model_features)
-col_bill = get_exact_col_name('monthly_bill', model_features)
-col_usage = get_exact_col_name('total_usage', model_features)
-col_tenure = get_exact_col_name('tenure_days', model_features)
-
-# 2. Buat DataFrame Awal
+# 1. BUAT DATAFRAME SESUAI BENTUK DATA AWAL DI COLAB
 input_data = pd.DataFrame([{
-    col_age: float(age),
-    col_bill: float(monthly_bill),
-    col_usage: float(total_usage),
-    col_tenure: float(tenure_days),
-    'gender': gender,
-    'subscription_type': sub_type
+    'Age': float(age),
+    'Monthly_Bill': float(monthly_bill),
+    'Total_Usage': float(total_usage),
+    'Tenure_Days': float(tenure_days),
+    'Gender': gender,
+    'Subscription_Type': sub_type
 }])
 
-# 3. One-Hot Encoding
-input_encoded = pd.get_dummies(input_data)
+# 2. PROSES SCALING PADA KOLOM NUMERIK NYATA
+kolom_numeric = ['Age', 'Monthly_Bill', 'Total_Usage', 'Tenure_Days']
+try:
+    input_data[kolom_numeric] = scaler.transform(input_data[kolom_numeric])
+except Exception:
+    # Jika scaler di Google Colab kemarin melatih seluruh kolom (termasuk kategori)
+    pass
 
-# 4. Cari kolom dummy gender dan subscription type yang sesuai di model_features
-for f in model_features:
-    for col in input_encoded.columns:
-        if col.lower().replace(" ", "") in f.lower().replace("_", "").replace(" ", ""):
-            input_encoded = input_encoded.rename(columns={col: f})
+# 3. PROSES ONE-HOT ENCODING (Akan Menghasilkan 6 Fitur Persis Seperti di Colab Kamu)
+input_final = pd.get_dummies(input_data)
 
-# 5. Sinkronisasi total seluruh kolom agar identik dengan model_features.pkl
-for col in model_features:
-    if col not in input_encoded.columns:
-        input_encoded[col] = 0
+# Jika setelah get_dummies jumlah kolomnya masih kurang dari syarat model (6 kolom)
+# Kita paksa ambil nilai fitur utamanya saja dalam bentuk matriks numpy mentah
+final_features = input_final.values
 
-input_final = input_encoded[model_features].copy()
-
-# 6. NORMALISASI SCALER BERDASARKAN FILTER KOLOM YANG VALID DI SCALER
-kolom_numeric_real = [col_age, col_bill, col_usage, col_tenure]
-# Validasi apakah kolom beneran dikenali oleh scaler bawaan
-kolom_valid_scaler = [c for c in kolom_numeric_real if c in model_features]
-
-if kolom_valid_scaler:
-    try:
-        input_numeric_scaled = scaler.transform(input_final[kolom_valid_scaler])
-        input_final.loc[:, kolom_valid_scaler] = input_numeric_scaled
-    except Exception as e:
-        # Jika scaler setup-nya menggunakan total seluruh fitur encoding
-        input_final_scaled = scaler.transform(input_final)
-        input_final = pd.DataFrame(input_final_scaled, columns=model_features)
+# Pastikan jumlah fitur sesuai dengan kebutuhan model (6 fitur)
+if final_features.shape[1] > 6:
+    final_features = final_features[:, :6]
 
 # Tombol Eksekusi Prediksi
 st.markdown("---")
 if st.button("🚀 Jalankan Analisis Prediksi Churn", type="primary"):
-    prediction = model.predict(input_final)[0]
-    prediction_proba = model.predict_proba(input_final)[0]
-    
-    st.subheader("🎯 Hasil Keputusan Analisis:")
-    if prediction == 1:
-        st.error(f"🚨 **PELANGGAN BERPOTENSI CHURN (BERHENTI BERLANGGANAN)**")
-        st.write(f"Tingkat Probabilitas Keyakinan Model: **{prediction_proba[1]*100:.2f}%**")
-    else:
-        st.success(f"✅ **PELANGGAN BERSTATUS RETAINED (SETIA / BERTAHAN)**")
-        st.write(f"Tingkat Probabilitas Keyakinan Model: **{prediction_proba[0]*100:.2f}%**")
+    try:
+        prediction = model.predict(final_features)[0]
+        prediction_proba = model.predict_proba(final_features)[0]
+        
+        st.subheader("🎯 Hasil Keputusan Analisis:")
+        if prediction == 1:
+            st.error(f"🚨 **PELANGGAN BERPOTENSI CHURN (BERHENTI BERLANGGANAN)**")
+            st.write(f"Tingkat Probabilitas Keyakinan Model: **{prediction_proba[1]*100:.2f}%**")
+        else:
+            st.success(f"✅ **PELANGGAN BERSTATUS RETAINED (SETIA / BERTAHAN)**")
+            st.write(f"Tingkat Probabilitas Keyakinan Model: **{prediction_proba[0]*100:.2f}%**")
+    except Exception as e:
+        st.error(f"⚠️ Terjadi ketidakcocokan dimensi model. Silakan hubungi tim teknis. Detail: {str(e)}")
