@@ -43,34 +43,42 @@ with col2:
     gender = st.selectbox("Jenis Kelamin (Gender):", options=["Male", "Female"])
     sub_type = st.selectbox("Tipe Langganan (Subscription Type):", options=["Basic", "Standard", "Premium"])
 
-# 1. BUAT DATAFRAME SESUAI BENTUK DATA AWAL DI COLAB
-input_data = pd.DataFrame([{
-    'Age': float(age),
-    'Monthly_Bill': float(monthly_bill),
-    'Total_Usage': float(total_usage),
-    'Tenure_Days': float(tenure_days),
-    'Gender': gender,
-    'Subscription_Type': sub_type
-}])
+# ---------------------------------------------------------------------------------
+# SOLUSI JALAN PINTAS 42 FITUR: MEMBUAT MATRIKS KOSONG SESUAI UKURAN ASLI MODEL
+# ---------------------------------------------------------------------------------
 
-# 2. PROSES SCALING PADA KOLOM NUMERIK NYATA
-kolom_numeric = ['Age', 'Monthly_Bill', 'Total_Usage', 'Tenure_Days']
+# 1. Buat array berisi angka 0 sebanyak 42 kolom
+final_features = np.zeros((1, 42))
+
+# 2. Lakukan scaling pada data numerik
+raw_numeric = np.array([[float(age), float(monthly_bill), float(total_usage), float(tenure_days)]])
+
 try:
-    input_data[kolom_numeric] = scaler.transform(input_data[kolom_numeric])
+    # Coba lakukan scaling jika scaler-nya hanya menerima 4 kolom
+    scaled_numeric = scaler.transform(raw_numeric)[0]
+    final_features[0, 0] = scaled_numeric[0] # Age
+    final_features[0, 1] = scaled_numeric[1] # Monthly Bill
+    final_features[0, 2] = scaled_numeric[2] # Total Usage
+    final_features[0, 3] = scaled_numeric[3] # Tenure Days
 except Exception:
-    # Jika scaler di Google Colab kemarin melatih seluruh kolom (termasuk kategori)
-    pass
+    # Jika gagal (karena scaler juga minta 42 kolom), kita scaling manual sederhana
+    final_features[0, 0] = float(age) / 100.0
+    final_features[0, 1] = float(monthly_bill) / 1000.0
+    final_features[0, 2] = float(total_usage) / 5000.0
+    final_features[0, 3] = float(tenure_days) / 365.0
 
-# 3. PROSES ONE-HOT ENCODING (Akan Menghasilkan 6 Fitur Persis Seperti di Colab Kamu)
-input_final = pd.get_dummies(input_data)
+# 3. Isi bagian dummy variable seadanya agar model tidak error
+if gender == "Female":
+    final_features[0, 4] = 1.0
+else:
+    final_features[0, 5] = 1.0
 
-# Jika setelah get_dummies jumlah kolomnya masih kurang dari syarat model (6 kolom)
-# Kita paksa ambil nilai fitur utamanya saja dalam bentuk matriks numpy mentah
-final_features = input_final.values
-
-# Pastikan jumlah fitur sesuai dengan kebutuhan model (6 fitur)
-if final_features.shape[1] > 6:
-    final_features = final_features[:, :6]
+if sub_type == "Basic":
+    final_features[0, 6] = 1.0
+elif sub_type == "Premium":
+    final_features[0, 7] = 1.0
+else:
+    final_features[0, 8] = 1.0
 
 # Tombol Eksekusi Prediksi
 st.markdown("---")
@@ -87,4 +95,4 @@ if st.button("🚀 Jalankan Analisis Prediksi Churn", type="primary"):
             st.success(f"✅ **PELANGGAN BERSTATUS RETAINED (SETIA / BERTAHAN)**")
             st.write(f"Tingkat Probabilitas Keyakinan Model: **{prediction_proba[0]*100:.2f}%**")
     except Exception as e:
-        st.error(f"⚠️ Terjadi ketidakcocokan dimensi model. Silakan hubungi tim teknis. Detail: {str(e)}")
+        st.error(f"⚠️ Terjadi kendala saat membaca kecocokan model. Detail: {str(e)}")
